@@ -112,7 +112,7 @@ npm install -g universal-db-mcp
 
 ### 单 Server 多 Profile（Claude Code / Codex）
 
-如果你想只保留一台 `db-mcp`，再在会话里按名称切库，可以把多个数据库 profile 放进宿主 MCP 配置，再通过 `--config-path` 和 `--config-key` 让 server 自己回读配置：
+如果你想只保留一台 `db-mcp`，再在会话里按名称切库，可以把多个数据库 profile 直接放进宿主 MCP 配置。server 会优先自动发现当前项目里的 `.mcp.json`，找不到时再回退到 `~/.claude.json`：
 
 ```json
 {
@@ -121,11 +121,8 @@ npm install -g universal-db-mcp
       "type": "stdio",
       "command": "npx",
       "args": [
-        "universal-db-mcp",
-        "--config-path",
-        "C:\\Users\\alice\\.claude.json",
-        "--config-key",
-        "db-mcp"
+        "-y",
+        "github:sanhua1/db-mcp"
       ],
       "profiles": {
         "profile-dev": {
@@ -157,6 +154,8 @@ npm install -g universal-db-mcp
 - `get_connection_status`
 
 再执行查询。
+
+如果自动发现存在歧义，仍然可以用 `--config-path` 和 `--config-key` 手工覆盖。
 
 ### HTTP API 模式
 

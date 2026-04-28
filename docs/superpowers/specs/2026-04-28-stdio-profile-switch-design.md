@@ -30,11 +30,8 @@ HTTP API 模式不在本次范围内。
       "type": "stdio",
       "command": "npx",
       "args": [
-        "universal-db-mcp",
-        "--config-path",
-        "C:/Users/example/.claude.json",
-        "--config-key",
-        "db-mcp"
+        "-y",
+        "github:sanhua1/db-mcp"
       ],
       "profiles": {
         "profile-dev": {
@@ -60,7 +57,7 @@ HTTP API 模式不在本次范围内。
 
 ## CLI 设计
 
-新增两个 stdio 专用参数：
+优先走自动发现。显式参数仅作为覆盖：
 
 - `--config-path <path>`
 - `--config-key <key>`
@@ -73,9 +70,11 @@ HTTP API 模式不在本次范围内。
 行为：
 
 1. 启动时先解析已有单连接 CLI 参数
-2. 如果提供 `--config-path + --config-key`，再从宿主配置中读取 `profiles` 和 `defaultProfile`
-3. 如果读取到 profile 配置，则 stdio server 进入“profile 模式”
-4. profile 模式下，旧的单连接 CLI 参数仍保留兼容，但优先级低于显式切换
+2. 如果显式提供 `--config-path`，优先读取该文件；`--config-key` 可选
+3. 如果未显式提供路径，优先从当前工作目录向上查找 `.mcp.json`
+4. 如果项目内未找到，再回退到 `~/.claude.json`
+5. 如果读取到 profile 配置，则 stdio server 进入“profile 模式”
+6. profile 模式下，旧的单连接 CLI 参数仍保留兼容，但优先级低于显式切换
 
 ## MCP 工具设计
 

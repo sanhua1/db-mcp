@@ -261,7 +261,7 @@ SESSION_CLEANUP_INTERVAL=300000
 
 ### 单 Server 多 Profile 配置
 
-如果你希望在 Claude Code / Codex 中只保留一个 `db-mcp`，再通过工具切换数据库，可以使用命名 profile 模式：
+如果你希望在 Claude Code / Codex 中只保留一个 `db-mcp`，再通过工具切换数据库，可以使用命名 profile 模式。server 会优先自动发现当前项目里的 `.mcp.json`，找不到时再回退到 `~/.claude.json`：
 
 ```json
 {
@@ -270,11 +270,8 @@ SESSION_CLEANUP_INTERVAL=300000
       "type": "stdio",
       "command": "npx",
       "args": [
-        "universal-db-mcp",
-        "--config-path",
-        "C:\\Users\\alice\\.claude.json",
-        "--config-key",
-        "db-mcp"
+        "-y",
+        "github:sanhua1/db-mcp"
       ],
       "profiles": {
         "profile-dev": {
@@ -302,15 +299,19 @@ SESSION_CLEANUP_INTERVAL=300000
 说明：
 
 - `profiles` 放在宿主 MCP 配置里
-- `--config-path` 指向宿主配置文件
-- `--config-key` 指向当前 server 的 key
 - `defaultProfile` 可选，不设置时启动后不自动连接
+- 自动发现顺序：当前项目向上查找 `.mcp.json`，然后回退到 `~/.claude.json`
 
 profile 模式下建议先调用：
 
 - `list_profiles` 查看可用 profile
 - `switch_profile` 切换目标数据库
 - `get_connection_status` 查看当前连接
+
+如果自动发现存在歧义，仍然可以显式传：
+
+- `--config-path`
+- `--config-key`
 
 ### 启用读写模式（不能删除）
 

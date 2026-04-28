@@ -3,10 +3,10 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readMcpProfilesConfig } from '../../src/utils/mcp-config-reader.js';
+import { readMcpProfilesConfig, resolveMcpProfilesConfig } from '../../src/utils/mcp-config-reader.js';
 
 async function createTempConfigFile(content: string): Promise<{ dir: string; path: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'mcp-config-reader-'));
@@ -121,5 +121,108 @@ describe('MCP Host Config Reader', () => {
 
     const currentContent = await readFile(path, 'utf8');
     expect(currentContent).toBe(originalContent);
+  });
+
+  it('should auto-discover the nearest .mcp.json', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mcp-config-reader-root-'));
+    const nestedDir = join(rootDir, 'apps', 'demo');
+    const nestedChildDir = join(nestedDir, 'worker');
+    tempDirs.push(rootDir);
+
+    await mkdir(nestedChildDir, { recursive: true });
+
+    await writeFile(join(rootDir, '.mcp.json'), JSON.stringify({
+      mcpServers: {
+        'root-server': {
+          profiles: {
+            'root-profile': {
+              type: 'sqlite',
+              filePath: ':memory:',
+            },
+          },
+        },
+      },
+    }), 'utf8');
+
+    await writeFile(join(nestedDir, '.mcp.json'), JSON.stringify({
+      mcpServers: {
+        'db-mcp': {
+          profiles: {
+            'nearest-profile': {
+              type: 'sqlite',
+              filePath: ':memory:',
+            },
+          },
+        },
+      },
+    }), 'utf8');
+
+    await writeFile(join(nestedChildDir, 'placeholder.txt'), 'x', 'utf8');
+
+    const config = await resolveMcpProfilesConfig({
+      cwd: nestedChildDir,
+      homeDir: rootDir,
+    });
+
+    expect(config?.configKey).toBe('db-mcp');
+    expect(config?.configPath).toBe(join(nestedDir, '.mcp.json'));
+    expect(Object.keys(config?.profiles || {})).toEqual(['nearest-profile']);
+  });
+
+  it('should fall back to home .claude.json when project .mcp.json is missing', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mcp-config-reader-home-'));
+    tempDirs.push(rootDir);
+
+    await writeFile(join(rootDir, '.claude.json'), JSON.stringify({
+      mcpServers: {
+        'db-mcp': {
+          profiles: {
+            'home-profile': {
+              type: 'sqlite',
+              filePath: ':memory:',
+            },
+          },
+        },
+      },
+    }), 'utf8');
+
+    const config = await resolveMcpProfilesConfig({
+      cwd: join(rootDir, 'project'),
+      homeDir: rootDir,
+    });
+
+    expect(config?.configPath).toBe(join(rootDir, '.claude.json'));
+    expect(Object.keys(config?.profiles || {})).toEqual(['home-profile']);
+  });
+
+  it('should throw when auto-discovery finds multiple profile servers without a clear key', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mcp-config-reader-ambiguous-'));
+    tempDirs.push(rootDir);
+
+    await writeFile(join(rootDir, '.mcp.json'), JSON.stringify({
+      mcpServers: {
+        'server-a': {
+          profiles: {
+            'profile-a': {
+              type: 'sqlite',
+              filePath: ':memory:',
+            },
+          },
+        },
+        'server-b': {
+          profiles: {
+            'profile-b': {
+              type: 'sqlite',
+              filePath: ':memory:',
+            },
+          },
+        },
+      },
+    }), 'utf8');
+
+    await expect(resolveMcpProfilesConfig({
+      cwd: rootDir,
+      homeDir: rootDir,
+    })).rejects.toThrow('多个包含 profiles');
   });
 });

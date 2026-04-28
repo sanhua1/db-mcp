@@ -113,7 +113,7 @@ Restart Claude Desktop and start asking questions:
 
 ### Single Server, Multiple Profiles (Claude Code / Codex)
 
-If you want to keep a single `db-mcp` server and switch databases by name during the session, define named profiles in the host MCP config and let the server read them back through `--config-path` and `--config-key`:
+If you want to keep a single `db-mcp` server and switch databases by name during the session, define named profiles directly in the host MCP config. The server will auto-discover `.mcp.json` in the current project first, then fall back to `~/.claude.json`:
 
 ```json
 {
@@ -122,11 +122,8 @@ If you want to keep a single `db-mcp` server and switch databases by name during
       "type": "stdio",
       "command": "npx",
       "args": [
-        "universal-db-mcp",
-        "--config-path",
-        "C:\\Users\\alice\\.claude.json",
-        "--config-key",
-        "db-mcp"
+        "-y",
+        "github:sanhua1/db-mcp"
       ],
       "profiles": {
         "profile-dev": {
@@ -158,6 +155,8 @@ If you want to keep a single `db-mcp` server and switch databases by name during
 - `get_connection_status`
 
 before running queries.
+
+If auto-discovery is ambiguous, you can still override it with `--config-path` and `--config-key`.
 
 ### HTTP API Mode
 

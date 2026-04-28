@@ -8,7 +8,7 @@ import { Command } from 'commander';
 import { DatabaseMCPServer } from './mcp-server.js';
 import type { DbConfig, PermissionType, PermissionMode } from '../types/adapter.js';
 import { normalizeDbType } from '../utils/adapter-factory.js';
-import { readMcpProfilesConfig } from '../utils/mcp-config-reader.js';
+import { resolveMcpProfilesConfig } from '../utils/mcp-config-reader.js';
 import { resolvePermissions, formatPermissions } from '../utils/safety.js';
 
 /**
@@ -73,13 +73,10 @@ export async function startMcpServer(): Promise<void> {
           process.stdin.on('close', () => gracefulShutdown('stdin-close'));
         }
 
-        if ((options.configPath && !options.configKey) || (!options.configPath && options.configKey)) {
-          throw new Error('使用命名 profile 配置时，必须同时提供 --config-path 和 --config-key');
-        }
-
-        const hostProfileConfig = options.configPath && options.configKey
-          ? await readMcpProfilesConfig(options.configPath, options.configKey)
-          : null;
+        const hostProfileConfig = await resolveMcpProfilesConfig({
+          configKey: options.configKey,
+          configPath: options.configPath,
+        });
 
         if (options.type) {
           // === 有初始配置：和原来完全一样的逻辑 ===
@@ -134,7 +131,7 @@ export async function startMcpServer(): Promise<void> {
           const server = new DatabaseMCPServer(config);
           if (hostProfileConfig) {
             server.setProfiles(hostProfileConfig.profiles, hostProfileConfig.defaultProfile);
-            console.error(`📚 已加载命名 profile: ${Object.keys(hostProfileConfig.profiles).length} 个`);
+            console.error(`📚 已从 ${hostProfileConfig.configPath} 的 ${hostProfileConfig.configKey} 加载命名 profile: ${Object.keys(hostProfileConfig.profiles).length} 个`);
           }
           await server.start();
 
@@ -142,7 +139,7 @@ export async function startMcpServer(): Promise<void> {
         } else {
           // === 无初始配置：无连接模式启动 ===
           if (hostProfileConfig) {
-            console.error(`📚 已加载命名 profile: ${Object.keys(hostProfileConfig.profiles).length} 个`);
+            console.error(`📚 已从 ${hostProfileConfig.configPath} 的 ${hostProfileConfig.configKey} 加载命名 profile: ${Object.keys(hostProfileConfig.profiles).length} 个`);
             if (hostProfileConfig.defaultProfile) {
               console.error(`🎯 默认 profile: ${hostProfileConfig.defaultProfile}`);
             } else {
