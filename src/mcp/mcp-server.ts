@@ -13,22 +13,24 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { DbAdapter, DbConfig } from '../types/adapter.js';
-import { DatabaseService, SchemaCacheConfig } from '../core/database-service.js';
-import { createAdapter, normalizeDbType } from '../utils/adapter-factory.js';
+import { SchemaCacheConfig } from '../core/database-service.js';
+import { StdioProfileManager } from '../core/stdio-profile-manager.js';
+import { normalizeDbType } from '../utils/adapter-factory.js';
 
 /**
  * 数据库 MCP 服务器类
  */
 export class DatabaseMCPServer {
-  private server: Server;
-  private adapter: DbAdapter | null = null;
-  private config: DbConfig | null;
-  private databaseService: DatabaseService | null = null;
   private cacheConfig: Partial<SchemaCacheConfig>;
+  private initialAdapter: DbAdapter | null = null;
+  private initialConfig: DbConfig | null;
+  private profileManager: StdioProfileManager;
+  private server: Server;
 
   constructor(config?: DbConfig, cacheConfig?: Partial<SchemaCacheConfig>) {
-    this.config = config || null;
+    this.initialConfig = config || null;
     this.cacheConfig = cacheConfig || {};
+    this.profileManager = new StdioProfileManager(this.cacheConfig);
     this.server = new Server(
       {
         name: 'universal-db-mcp',
@@ -45,10 +47,39 @@ export class DatabaseMCPServer {
   }
 
   /**
+   * 构建连接信息对象
+   */
+  private buildConnectionInfo(config: DbConfig | null): Record<string, unknown> | null {
+    if (!config) {
+      return null;
+    }
+
+    return {
+      type: config.type,
+      host: config.host,
+      port: config.port,
+      database: config.database,
+      filePath: config.filePath,
+      permissionMode: config.permissionMode || 'safe',
+    };
+  }
+
+  /**
+   * 获取当前已连接的数据库服务
+   */
+  private getConnectedService() {
+    const databaseService = this.profileManager.getDatabaseService();
+    if (!databaseService) {
+      throw new Error('数据库未连接。请先使用 connect_database 或 switch_profile 工具连接数据库。');
+    }
+
+    return databaseService;
+  }
+
+  /**
    * 设置 MCP 协议处理器
    */
   private setupHandlers(): void {
-    // 列出可用工具
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: [
@@ -195,6 +226,28 @@ export class DatabaseMCPServer {
             },
           },
           {
+            name: 'list_profiles',
+            description: '列出当前 server 可用的所有命名数据库 profile，并返回默认 profile、当前 profile 和连接状态。',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+            },
+          },
+          {
+            name: 'switch_profile',
+            description: '切换到指定的命名数据库 profile。如果当前已有连接，会先断开再连接到目标 profile。',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                profileName: {
+                  type: 'string',
+                  description: '要切换到的 profile 名称',
+                },
+              },
+              required: ['profileName'],
+            },
+          },
+          {
             name: 'disconnect_database',
             description: '断开当前数据库连接。断开后需要重新调用 connect_database 才能执行查询。',
             inputSchema: {
@@ -214,12 +267,10 @@ export class DatabaseMCPServer {
       };
     });
 
-    // 处理工具调用
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
 
       try {
-        // 连接管理类 tool 不需要检查数据库连接
         switch (name) {
           case 'connect_database': {
             const {
@@ -227,7 +278,6 @@ export class DatabaseMCPServer {
               filePath, allowWrite, permissionMode, authSource, oracleClientPath,
             } = args as Record<string, any>;
 
-            // 构建新配置
             const newConfig: DbConfig = {
               type: normalizeDbType(type),
               host,
@@ -240,35 +290,16 @@ export class DatabaseMCPServer {
               permissionMode: permissionMode || 'safe',
             };
 
-            // MongoDB 特殊配置
             if (newConfig.type === 'mongodb' && authSource) {
               (newConfig as any).authSource = authSource;
             }
 
-            // Oracle 特殊配置
             if (newConfig.type === 'oracle' && oracleClientPath) {
               newConfig.oracleClientPath = oracleClientPath;
             }
 
-            // 断开旧连接
-            if (this.adapter) {
-              console.error('🔄 断开旧数据库连接...');
-              if (this.databaseService) {
-                this.databaseService.clearSchemaCache();
-              }
-              await this.adapter.disconnect();
-              this.adapter = null;
-              this.databaseService = null;
-            }
-
-            // 建立新连接
             console.error(`🔌 正在连接 ${newConfig.type} 数据库...`);
-            const newAdapter = createAdapter(newConfig);
-            await newAdapter.connect();
-
-            this.adapter = newAdapter;
-            this.config = newConfig;
-            this.databaseService = new DatabaseService(newAdapter, newConfig, this.cacheConfig);
+            await this.profileManager.connectDirect(newConfig);
 
             const connInfo = newConfig.type === 'sqlite'
               ? `SQLite: ${newConfig.filePath}`
@@ -282,20 +313,55 @@ export class DatabaseMCPServer {
                 text: JSON.stringify({
                   success: true,
                   message: `已成功连接到 ${connInfo}`,
-                  connection: {
-                    type: newConfig.type,
-                    host: newConfig.host,
-                    port: newConfig.port,
-                    database: newConfig.database,
-                    permissionMode: newConfig.permissionMode || 'safe',
-                  },
+                  currentProfileName: null,
+                  connection: this.buildConnectionInfo(newConfig),
+                }, null, 2),
+              }],
+            };
+          }
+
+          case 'list_profiles': {
+            const status = this.profileManager.getStatus();
+
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  availableProfiles: status.availableProfiles,
+                  connected: status.connected,
+                  currentProfileName: status.currentProfileName,
+                  defaultProfile: status.defaultProfile,
+                }, null, 2),
+              }],
+            };
+          }
+
+          case 'switch_profile': {
+            const { profileName } = args as { profileName: string };
+
+            console.error(`🔀 正在切换 profile: ${profileName}`);
+            await this.profileManager.switchProfile(profileName);
+
+            const status = this.profileManager.getStatus();
+
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  connected: status.connected,
+                  currentProfileName: status.currentProfileName,
+                  defaultProfile: status.defaultProfile,
+                  availableProfiles: status.availableProfiles,
+                  connection: this.buildConnectionInfo(status.config),
                 }, null, 2),
               }],
             };
           }
 
           case 'disconnect_database': {
-            if (!this.adapter) {
+            const status = this.profileManager.getStatus();
+            if (!status.connected) {
               return {
                 content: [{
                   type: 'text',
@@ -304,15 +370,8 @@ export class DatabaseMCPServer {
               };
             }
 
-            if (this.databaseService) {
-              this.databaseService.clearSchemaCache();
-            }
-            await this.adapter.disconnect();
-
-            const oldType = this.config?.type;
-            this.adapter = null;
-            this.config = null;
-            this.databaseService = null;
+            const oldType = status.config?.type;
+            await this.profileManager.disconnectCurrent();
 
             console.error('👋 数据库连接已断开');
 
@@ -328,44 +387,54 @@ export class DatabaseMCPServer {
           }
 
           case 'get_connection_status': {
-            if (!this.adapter || !this.config) {
+            const snapshot = this.profileManager.getStatus();
+            if (!snapshot.connected || !snapshot.config) {
               return {
                 content: [{
                   type: 'text',
                   text: JSON.stringify({
+                    availableProfiles: snapshot.availableProfiles,
                     connected: false,
-                    message: '当前未连接任何数据库。请使用 connect_database 工具连接。',
+                    currentProfileName: snapshot.currentProfileName,
+                    defaultProfile: snapshot.defaultProfile,
+                    message: '当前未连接任何数据库。请使用 connect_database 或 switch_profile 工具连接数据库。',
+                    profileModeEnabled: snapshot.availableProfiles.length > 0,
                   }, null, 2),
                 }],
               };
             }
 
-            const status: Record<string, any> = {
+            const responseStatus: Record<string, any> = {
+              availableProfiles: snapshot.availableProfiles,
               connected: true,
-              type: this.config.type,
-              permissionMode: this.config.permissionMode || 'safe',
+              currentProfileName: snapshot.currentProfileName,
+              defaultProfile: snapshot.defaultProfile,
+              permissionMode: snapshot.config.permissionMode || 'safe',
+              profileModeEnabled: snapshot.availableProfiles.length > 0,
+              type: snapshot.config.type,
             };
 
-            if (this.config.type === 'sqlite') {
-              status.filePath = this.config.filePath;
+            if (snapshot.config.type === 'sqlite') {
+              responseStatus.filePath = snapshot.config.filePath;
             } else {
-              status.host = this.config.host;
-              status.port = this.config.port;
-              status.database = this.config.database;
+              responseStatus.host = snapshot.config.host;
+              responseStatus.port = snapshot.config.port;
+              responseStatus.database = snapshot.config.database;
             }
 
-            if (this.databaseService) {
-              const cacheStats = this.databaseService.getCacheStats();
-              status.schemaCache = {
+            const databaseService = this.profileManager.getDatabaseService();
+            if (databaseService) {
+              const cacheStats = databaseService.getCacheStats();
+              responseStatus.schemaCache = {
                 cached: cacheStats.isCached,
-                hitRate: this.databaseService.getCacheHitRate() + '%',
+                hitRate: databaseService.getCacheHitRate() + '%',
               };
             }
 
             return {
               content: [{
                 type: 'text',
-                text: JSON.stringify(status, null, 2),
+                text: JSON.stringify(responseStatus, null, 2),
               }],
             };
           }
@@ -374,10 +443,7 @@ export class DatabaseMCPServer {
             break;
         }
 
-        // 以下 tool 需要数据库已连接
-        if (!this.databaseService) {
-          throw new Error('数据库未连接。请先使用 connect_database 工具连接数据库。');
-        }
+        const databaseService = this.getConnectedService();
 
         switch (name) {
           case 'execute_query': {
@@ -385,7 +451,7 @@ export class DatabaseMCPServer {
 
             console.error(`📊 执行查询: ${query.substring(0, 100)}...`);
 
-            const result = await this.databaseService.executeQuery(query, params);
+            const result = await databaseService.executeQuery(query, params);
 
             return {
               content: [
@@ -402,16 +468,14 @@ export class DatabaseMCPServer {
 
             console.error('📋 获取数据库结构...');
 
-            const schema = await this.databaseService.getSchema(forceRefresh);
-
-            // 添加缓存状态信息
-            const cacheStats = this.databaseService.getCacheStats();
+            const schema = await databaseService.getSchema(forceRefresh);
+            const cacheStats = databaseService.getCacheStats();
             const response = {
               ...schema,
               _cacheInfo: {
                 cached: cacheStats.isCached,
                 cachedAt: cacheStats.cachedAt?.toISOString(),
-                hitRate: this.databaseService.getCacheHitRate() + '%',
+                hitRate: databaseService.getCacheHitRate() + '%',
               },
             };
 
@@ -430,7 +494,7 @@ export class DatabaseMCPServer {
 
             console.error(`📄 获取表信息: ${tableName}`);
 
-            const table = await this.databaseService.getTableInfo(tableName, forceRefresh);
+            const table = await databaseService.getTableInfo(tableName, forceRefresh);
 
             return {
               content: [
@@ -445,7 +509,7 @@ export class DatabaseMCPServer {
           case 'clear_cache': {
             console.error('🗑️ 清除 Schema 缓存...');
 
-            this.databaseService.clearSchemaCache();
+            databaseService.clearSchemaCache();
 
             return {
               content: [
@@ -470,7 +534,7 @@ export class DatabaseMCPServer {
 
             console.error(`🔢 获取枚举值: ${tableName}.${columnName}`);
 
-            const result = await this.databaseService.getEnumValues(
+            const result = await databaseService.getEnumValues(
               tableName,
               columnName,
               limit,
@@ -496,7 +560,7 @@ export class DatabaseMCPServer {
 
             console.error(`📝 获取示例数据: ${tableName}`);
 
-            const result = await this.databaseService.getSampleData(
+            const result = await databaseService.getSampleData(
               tableName,
               columns,
               limit
@@ -533,13 +597,24 @@ export class DatabaseMCPServer {
   }
 
   /**
-   * 设置数据库适配器
+   * 设置单连接启动配置使用的适配器
    */
   setAdapter(adapter: DbAdapter): void {
-    this.adapter = adapter;
-    if (this.config) {
-      this.databaseService = new DatabaseService(adapter, this.config, this.cacheConfig);
-    }
+    this.initialAdapter = adapter;
+  }
+
+  /**
+   * 设置命名 profile 配置
+   */
+  setProfiles(profiles: Record<string, DbConfig>, defaultProfile?: string | null): void {
+    this.profileManager.setProfiles(profiles, defaultProfile);
+  }
+
+  /**
+   * 获取当前连接状态快照
+   */
+  getConnectionStatusSnapshot(): ReturnType<StdioProfileManager['getStatus']> {
+    return this.profileManager.getStatus();
   }
 
   /**
@@ -550,26 +625,38 @@ export class DatabaseMCPServer {
   }
 
   /**
+   * 切换到指定 profile
+   */
+  async switchProfile(profileName: string): Promise<void> {
+    await this.profileManager.switchProfile(profileName);
+  }
+
+  /**
    * 连接数据库（不启动传输层）
    */
   async connectDatabase(): Promise<void> {
-    if (!this.adapter) {
-      throw new Error('必须先设置数据库适配器才能连接数据库');
+    if (this.initialAdapter && this.initialConfig) {
+      console.error('🔌 正在连接数据库...');
+      await this.initialAdapter.connect();
+      this.profileManager.attachConnectedAdapter(this.initialAdapter, this.initialConfig, null);
+      console.error('✅ 数据库连接成功');
+      this.initialAdapter = null;
+    } else {
+      if (!this.initialConfig) {
+        throw new Error('必须先提供启动配置才能连接数据库');
+      }
+
+      console.error('🔌 正在连接数据库...');
+      await this.profileManager.connectDirect(this.initialConfig);
+      console.error('✅ 数据库连接成功');
     }
 
-    // 连接数据库
-    console.error('🔌 正在连接数据库...');
-    await this.adapter.connect();
-    console.error('✅ 数据库连接成功');
-
-    // 显示安全模式状态
-    if (this.config?.allowWrite) {
+    if (this.initialConfig?.allowWrite) {
       console.error('⚠️  警告: 写入模式已启用，请谨慎操作！');
     } else {
       console.error('🛡️  安全模式: 只读模式（推荐）');
     }
 
-    // 显示缓存配置
     console.error('📦 Schema 缓存已启用 (默认 TTL: 5 分钟)');
   }
 
@@ -584,14 +671,19 @@ export class DatabaseMCPServer {
    * 启动服务器（使用 stdio 传输，用于 Claude Desktop）
    */
   async start(): Promise<void> {
-    // 如果有初始配置和适配器，先连接；否则等待 AI 调用 connect_database
-    if (this.adapter) {
+    if (this.initialConfig) {
       await this.connectDatabase();
+    } else if (this.profileManager.getDefaultProfile()) {
+      const defaultProfile = this.profileManager.getDefaultProfile()!;
+      console.error(`🔌 正在连接默认 profile: ${defaultProfile}...`);
+      await this.profileManager.connectDefaultProfile();
+      console.error('✅ 默认 profile 已连接');
+    } else if (this.profileManager.hasProfiles()) {
+      console.error('📡 已加载命名 profile，当前未连接数据库，等待通过 switch_profile 工具切换...');
     } else {
       console.error('📡 MCP 服务器以无连接模式启动，等待通过 connect_database 工具连接数据库...');
     }
 
-    // 启动 MCP 服务器（stdio 模式）
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
 
@@ -602,21 +694,14 @@ export class DatabaseMCPServer {
    * 停止服务器
    */
   async stop(): Promise<void> {
-    // 1. 关闭 MCP Server（释放 transport 层资源：stdin/stdout 监听器等）
     try {
       await this.server.close();
     } catch (err) {
       console.error('关闭 MCP Server 时出错:', err instanceof Error ? err.message : String(err));
     }
 
-    // 2. 清理 Schema 缓存
-    if (this.databaseService) {
-      this.databaseService.clearSchemaCache();
-    }
-
-    // 3. 断开数据库连接
-    if (this.adapter) {
-      await this.adapter.disconnect();
+    if (this.profileManager.getStatus().connected) {
+      await this.profileManager.disconnectCurrent();
       console.error('👋 数据库连接已关闭');
     }
   }

@@ -110,6 +110,54 @@ npm install -g universal-db-mcp
 - *"统计最近 7 天的订单数量"*
 - *"找出销量最高的 5 个产品"*
 
+### 单 Server 多 Profile（Claude Code / Codex）
+
+如果你想只保留一台 `db-mcp`，再在会话里按名称切库，可以把多个数据库 profile 放进宿主 MCP 配置，再通过 `--config-path` 和 `--config-key` 让 server 自己回读配置：
+
+```json
+{
+  "mcpServers": {
+    "db-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "universal-db-mcp",
+        "--config-path",
+        "C:\\Users\\alice\\.claude.json",
+        "--config-key",
+        "db-mcp"
+      ],
+      "profiles": {
+        "profile-dev": {
+          "type": "mysql",
+          "host": "dev-db.example.com",
+          "port": 3306,
+          "user": "read-only",
+          "password": "your_password",
+          "database": "app_dev"
+        },
+        "profile-prod": {
+          "type": "mysql",
+          "host": "prod-db.example.com",
+          "port": 3306,
+          "user": "read-only",
+          "password": "your_password",
+          "database": "app_prod"
+        }
+      }
+    }
+  }
+}
+```
+
+`defaultProfile` 是可选的。不设置时，server 启动后保持未连接状态。你可以在会话里先调用：
+
+- `list_profiles`
+- `switch_profile`
+- `get_connection_status`
+
+再执行查询。
+
 ### HTTP API 模式
 
 ```bash

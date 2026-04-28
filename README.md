@@ -111,6 +111,54 @@ Restart Claude Desktop and start asking questions:
 - *"Count orders from the last 7 days"*
 - *"Find the top 5 products by sales"*
 
+### Single Server, Multiple Profiles (Claude Code / Codex)
+
+If you want to keep a single `db-mcp` server and switch databases by name during the session, define named profiles in the host MCP config and let the server read them back through `--config-path` and `--config-key`:
+
+```json
+{
+  "mcpServers": {
+    "db-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "universal-db-mcp",
+        "--config-path",
+        "C:\\Users\\alice\\.claude.json",
+        "--config-key",
+        "db-mcp"
+      ],
+      "profiles": {
+        "profile-dev": {
+          "type": "mysql",
+          "host": "dev-db.example.com",
+          "port": 3306,
+          "user": "read-only",
+          "password": "your_password",
+          "database": "app_dev"
+        },
+        "profile-prod": {
+          "type": "mysql",
+          "host": "prod-db.example.com",
+          "port": 3306,
+          "user": "read-only",
+          "password": "your_password",
+          "database": "app_prod"
+        }
+      }
+    }
+  }
+}
+```
+
+`defaultProfile` is optional. If you omit it, the server starts disconnected. You can then use:
+
+- `list_profiles`
+- `switch_profile`
+- `get_connection_status`
+
+before running queries.
+
 ### HTTP API Mode
 
 ```bash

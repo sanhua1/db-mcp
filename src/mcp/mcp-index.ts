@@ -7,7 +7,8 @@
 import { Command } from 'commander';
 import { DatabaseMCPServer } from './mcp-server.js';
 import type { DbConfig, PermissionType, PermissionMode } from '../types/adapter.js';
-import { createAdapter, normalizeDbType } from '../utils/adapter-factory.js';
+import { normalizeDbType } from '../utils/adapter-factory.js';
+import { readMcpProfilesConfig } from '../utils/mcp-config-reader.js';
 import { resolvePermissions, formatPermissions } from '../utils/safety.js';
 
 /**
@@ -32,6 +33,8 @@ export async function startMcpServer(): Promise<void> {
     .option('--danger-allow-write', '启用完全写入模式（危险！等价于 --permission-mode=full）', false)
     .option('--permission-mode <mode>', '权限模式: safe(只读) | readwrite(读写不删) | full(完全控制)', 'safe')
     .option('--permissions <list>', '自定义权限列表，逗号分隔: read,insert,update,delete,ddl')
+    .option('--config-path <path>', '宿主 MCP 配置文件路径，用于读取命名 profile 配置')
+    .option('--config-key <key>', '宿主配置中 mcpServers 下当前 server 的 key，如 db-mcp')
     .action(async (options) => {
       try {
         // 提取 graceful shutdown 逻辑为复用函数
@@ -69,6 +72,14 @@ export async function startMcpServer(): Promise<void> {
           process.stdin.on('end', () => gracefulShutdown('stdin-end'));
           process.stdin.on('close', () => gracefulShutdown('stdin-close'));
         }
+
+        if ((options.configPath && !options.configKey) || (!options.configPath && options.configKey)) {
+          throw new Error('使用命名 profile 配置时，必须同时提供 --config-path 和 --config-key');
+        }
+
+        const hostProfileConfig = options.configPath && options.configKey
+          ? await readMcpProfilesConfig(options.configPath, options.configKey)
+          : null;
 
         if (options.type) {
           // === 有初始配置：和原来完全一样的逻辑 ===
@@ -121,21 +132,31 @@ export async function startMcpServer(): Promise<void> {
 
           // Create server
           const server = new DatabaseMCPServer(config);
-
-          // Create adapter using factory
-          const adapter = createAdapter(config);
-
-          // Set adapter and start server
-          server.setAdapter(adapter);
+          if (hostProfileConfig) {
+            server.setProfiles(hostProfileConfig.profiles, hostProfileConfig.defaultProfile);
+            console.error(`📚 已加载命名 profile: ${Object.keys(hostProfileConfig.profiles).length} 个`);
+          }
           await server.start();
 
           setupGracefulShutdown(server);
         } else {
           // === 无初始配置：无连接模式启动 ===
-          console.error('📡 无连接模式：未指定数据库类型，等待通过 connect_database 工具动态连接...');
+          if (hostProfileConfig) {
+            console.error(`📚 已加载命名 profile: ${Object.keys(hostProfileConfig.profiles).length} 个`);
+            if (hostProfileConfig.defaultProfile) {
+              console.error(`🎯 默认 profile: ${hostProfileConfig.defaultProfile}`);
+            } else {
+              console.error('📡 未设置默认 profile，启动后保持未连接状态');
+            }
+          } else {
+            console.error('📡 无连接模式：未指定数据库类型，等待通过 connect_database 工具动态连接...');
+          }
           console.error('');
 
           const server = new DatabaseMCPServer();
+          if (hostProfileConfig) {
+            server.setProfiles(hostProfileConfig.profiles, hostProfileConfig.defaultProfile);
+          }
           await server.start();
 
           setupGracefulShutdown(server);

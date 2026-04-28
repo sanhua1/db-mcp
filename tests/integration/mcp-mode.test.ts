@@ -19,16 +19,51 @@ describe('MCP Mode Integration Tests', () => {
       expect(server).toBeDefined();
     });
 
-    it('should require adapter before starting', async () => {
-      const config: DbConfig = {
-        type: 'sqlite',
-        filePath: ':memory:',
-        allowWrite: false
-      };
+    it('should stay disconnected when profiles are configured without default profile', () => {
+      const server = new DatabaseMCPServer();
 
-      const server = new DatabaseMCPServer(config);
+      server.setProfiles({
+        'profile-dev': {
+          type: 'sqlite',
+          filePath: ':memory:',
+          allowWrite: true,
+          permissionMode: 'full',
+        },
+        'profile-prod': {
+          type: 'sqlite',
+          filePath: ':memory:',
+          allowWrite: true,
+          permissionMode: 'full',
+        },
+      });
 
-      await expect(server.start()).rejects.toThrow('必须先设置数据库适配器');
+      expect(server.getConnectionStatusSnapshot()).toMatchObject({
+        connected: false,
+        currentProfileName: null,
+        availableProfiles: ['profile-dev', 'profile-prod'],
+      });
+    });
+
+    it('should switch active connection through named profile api', async () => {
+      const server = new DatabaseMCPServer();
+
+      server.setProfiles({
+        'profile-dev': {
+          type: 'sqlite',
+          filePath: ':memory:',
+          allowWrite: true,
+          permissionMode: 'full',
+        },
+      });
+
+      await server.switchProfile('profile-dev');
+
+      expect(server.getConnectionStatusSnapshot()).toMatchObject({
+        connected: true,
+        currentProfileName: 'profile-dev',
+      });
+
+      await server.stop();
     });
   });
 });

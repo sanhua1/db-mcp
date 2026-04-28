@@ -18,6 +18,8 @@ universal-db-mcp [选项]
   --auth-source <db>       MongoDB 认证数据库（默认: admin）
   --permission-mode <mode> 权限模式: safe | readwrite | full
   --permissions <list>     自定义权限列表，逗号分隔: read,insert,update,delete,ddl
+  --config-path <path>     宿主 MCP 配置文件路径，用于读取命名 profile
+  --config-key <key>       宿主配置中 mcpServers 下当前 server 的 key
   --danger-allow-write     启用完全写入模式（等价于 --permission-mode full）
   --help                   显示帮助信息
   --version                显示版本号
@@ -256,6 +258,59 @@ SESSION_CLEANUP_INTERVAL=300000
   }
 }
 ```
+
+### 单 Server 多 Profile 配置
+
+如果你希望在 Claude Code / Codex 中只保留一个 `db-mcp`，再通过工具切换数据库，可以使用命名 profile 模式：
+
+```json
+{
+  "mcpServers": {
+    "db-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "universal-db-mcp",
+        "--config-path",
+        "C:\\Users\\alice\\.claude.json",
+        "--config-key",
+        "db-mcp"
+      ],
+      "profiles": {
+        "profile-dev": {
+          "type": "mysql",
+          "host": "dev-db.example.com",
+          "port": 3306,
+          "user": "read-only",
+          "password": "your_password",
+          "database": "app_dev"
+        },
+        "profile-prod": {
+          "type": "mysql",
+          "host": "prod-db.example.com",
+          "port": 3306,
+          "user": "read-only",
+          "password": "your_password",
+          "database": "app_prod"
+        }
+      }
+    }
+  }
+}
+```
+
+说明：
+
+- `profiles` 放在宿主 MCP 配置里
+- `--config-path` 指向宿主配置文件
+- `--config-key` 指向当前 server 的 key
+- `defaultProfile` 可选，不设置时启动后不自动连接
+
+profile 模式下建议先调用：
+
+- `list_profiles` 查看可用 profile
+- `switch_profile` 切换目标数据库
+- `get_connection_status` 查看当前连接
 
 ### 启用读写模式（不能删除）
 
