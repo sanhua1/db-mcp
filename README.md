@@ -13,6 +13,14 @@
 </p>
 
 <p align="center">
+  <strong>Fork highlight:</strong> this fork adds multi-profile support for <code>stdio</code> mode in Claude Code and Codex. Keep a single <code>db-mcp</code> server, define multiple named database profiles in the host MCP config, and switch them during a session with <code>switch_profile</code>.
+</p>
+
+<p align="center">
+  Profile discovery prefers the current project's <code>.mcp.json</code> and falls back to <code>~/.claude.json</code>.
+</p>
+
+<p align="center">
   <a href="https://www.npmjs.com/package/universal-db-mcp"><img src="https://img.shields.io/npm/v/universal-db-mcp.svg?style=flat-square&color=blue" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/universal-db-mcp"><img src="https://img.shields.io/npm/dm/universal-db-mcp.svg?style=flat-square&color=green" alt="npm downloads"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="License: MIT"></a>
@@ -155,6 +163,30 @@ If you want to keep a single `db-mcp` server and switch databases by name during
 - `get_connection_status`
 
 before running queries.
+
+#### Typical Usage
+
+1. Put the config in the current project's `.mcp.json` under `mcpServers.db-mcp`.
+2. Start Claude Code or Codex from that project directory.
+3. In the session, ask the agent to call `list_profiles` first.
+4. Call `switch_profile` with the target profile name.
+5. Call `get_connection_status` to verify the active connection.
+6. Run schema or query tools such as `get_schema`, `get_table_info`, `get_sample_data`, and `execute_query`.
+7. When you need another database, call `switch_profile` again. No restart is needed.
+
+Example session flow:
+
+```text
+1. list_profiles
+2. switch_profile({ "profileName": "profile-dev" })
+3. get_connection_status
+4. get_schema
+5. get_table_info({ "tableName": "users" })
+6. execute_query({ "query": "SELECT COUNT(*) AS total FROM users" })
+7. switch_profile({ "profileName": "profile-prod" })
+```
+
+If you call `connect_database`, the server will create a temporary direct connection and clear the current named profile binding for that session.
 
 If auto-discovery is ambiguous, you can still override it with `--config-path` and `--config-key`.
 

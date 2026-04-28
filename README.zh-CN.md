@@ -12,6 +12,14 @@
 </p>
 
 <p align="center">
+  <strong>Fork 特性：</strong>这个分支为 Claude Code 和 Codex 的 <code>stdio</code> 模式补了多 profile 能力。你可以只保留一台 <code>db-mcp</code>，在宿主 MCP 配置里定义多个命名数据库连接，再在会话里用 <code>switch_profile</code> 切换。
+</p>
+
+<p align="center">
+  profile 配置会优先从当前项目的 <code>.mcp.json</code> 读取，找不到再回退到 <code>~/.claude.json</code>。
+</p>
+
+<p align="center">
   <a href="https://www.npmjs.com/package/universal-db-mcp"><img src="https://img.shields.io/npm/v/universal-db-mcp.svg?style=flat-square&color=blue" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/universal-db-mcp"><img src="https://img.shields.io/npm/dm/universal-db-mcp.svg?style=flat-square&color=green" alt="npm downloads"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="License: MIT"></a>
@@ -154,6 +162,30 @@ npm install -g universal-db-mcp
 - `get_connection_status`
 
 再执行查询。
+
+#### 使用方法
+
+1. 把配置写进当前项目的 `.mcp.json`，放在 `mcpServers.db-mcp` 下。
+2. 在这个项目目录里启动 Claude Code 或 Codex。
+3. 进入会话后，先让 agent 调 `list_profiles`。
+4. 再用 `switch_profile` 切到目标 profile。
+5. 用 `get_connection_status` 确认当前连接。
+6. 然后再调 `get_schema`、`get_table_info`、`get_sample_data`、`execute_query` 这些工具查库。
+7. 需要切到别的库时，再调一次 `switch_profile`，不用重启。
+
+示例流程：
+
+```text
+1. list_profiles
+2. switch_profile({ "profileName": "profile-dev" })
+3. get_connection_status
+4. get_schema
+5. get_table_info({ "tableName": "users" })
+6. execute_query({ "query": "SELECT COUNT(*) AS total FROM users" })
+7. switch_profile({ "profileName": "profile-prod" })
+```
+
+如果你调用了 `connect_database`，server 会改成这次会话的临时直连，并清掉当前命名 profile 绑定。
 
 如果自动发现存在歧义，仍然可以用 `--config-path` 和 `--config-key` 手工覆盖。
 
