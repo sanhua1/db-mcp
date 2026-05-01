@@ -41,6 +41,23 @@
 
 ---
 
+## 更新说明
+
+现在 `stdio` 命名 profile 也支持走 `env` 配置了。这个入口就是给 aio 这类只保留 `type`、`command`、`args`、`env` 标准字段、会吞掉 `profiles` 自定义字段的 MCP 网关用的。
+
+脱敏示例：
+
+```toml
+[mcp_servers.db-mcp]
+type = "stdio"
+command = "npx"
+args = ["-y", "github:sanhua1/db-mcp"]
+
+[mcp_servers.db-mcp.env]
+DB_MCP_PROFILES = '{"profile-dev":{"type":"mysql","host":"dev-db.example.com","port":3306,"user":"read-only","password":"your_password","database":"app_dev"},"profile-prod":{"type":"mysql","host":"prod-db.example.com","port":3306,"user":"read-only","password":"your_password","database":"app_prod"}}'
+DB_MCP_DEFAULT_PROFILE = "profile-dev"
+```
+
 ## 为什么选择 Universal DB MCP？
 
 想象一下，你问 AI 助手：*"帮我查一下这个月订单金额最高的 10 个客户"*，然后立即从数据库获得结果——无需编写 SQL。Universal DB MCP 通过模型上下文协议（MCP）和 HTTP API 将 AI 助手与你的数据库连接起来，让这一切成为可能。
@@ -155,6 +172,38 @@ npm install -g universal-db-mcp
 }
 ```
 
+如果你的 MCP 网关会吞掉 `profiles` 这种非标准字段，也可以把同一份 profile 注册表改放进 `env`：
+
+```toml
+[mcp_servers.db-mcp]
+type = "stdio"
+command = "npx"
+args = ["-y", "github:sanhua1/db-mcp"]
+
+[mcp_servers.db-mcp.env]
+DB_MCP_PROFILES = '''
+{
+  "profile-dev": {
+    "type": "mysql",
+    "host": "dev-db.example.com",
+    "port": 3306,
+    "user": "read-only",
+    "password": "your_password",
+    "database": "app_dev"
+  },
+  "profile-prod": {
+    "type": "mysql",
+    "host": "prod-db.example.com",
+    "port": 3306,
+    "user": "read-only",
+    "password": "your_password",
+    "database": "app_prod"
+  }
+}
+'''
+DB_MCP_DEFAULT_PROFILE = "profile-dev"
+```
+
 `defaultProfile` 是可选的。不设置时，server 启动后保持未连接状态。你可以在会话里先调用：
 
 - `list_profiles`
@@ -186,6 +235,18 @@ npm install -g universal-db-mcp
 ```
 
 如果你调用了 `connect_database`，server 会改成这次会话的临时直连，并清掉当前命名 profile 绑定。
+
+优先级顺序：
+
+1. `--config-path` / `--config-key`
+2. `DB_MCP_PROFILES` / `DB_MCP_DEFAULT_PROFILE`
+3. 自动发现的 `.mcp.json`
+4. 自动发现的 `~/.claude.json`
+
+`DB_MCP_PROFILES` 可以传两种 JSON：
+
+- 直接传 `{ profileName: dbConfig }`
+- 传 `{ "profiles": { ... }, "defaultProfile": "..." }`
 
 如果自动发现存在歧义，仍然可以用 `--config-path` 和 `--config-key` 手工覆盖。
 

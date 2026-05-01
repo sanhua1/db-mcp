@@ -195,6 +195,75 @@ describe('MCP Host Config Reader', () => {
     expect(Object.keys(config?.profiles || {})).toEqual(['home-profile']);
   });
 
+  it('should read profiles from env when present', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mcp-config-reader-env-'));
+    tempDirs.push(rootDir);
+
+    const config = await resolveMcpProfilesConfig({
+      cwd: rootDir,
+      homeDir: rootDir,
+      env: {
+        DB_MCP_PROFILES: JSON.stringify({
+          'env-profile': {
+            type: 'sqlite',
+            filePath: ':memory:',
+          },
+        }),
+        DB_MCP_DEFAULT_PROFILE: 'env-profile',
+      },
+    });
+
+    expect(config?.configKey).toBe('db-mcp');
+    expect(config?.configPath).toBe('env:DB_MCP_PROFILES');
+    expect(config?.defaultProfile).toBe('env-profile');
+    expect(Object.keys(config?.profiles || {})).toEqual(['env-profile']);
+  });
+
+  it('should prefer explicit config path over env profiles', async () => {
+    const { dir, path } = await createTempConfigFile(JSON.stringify({
+      mcpServers: {
+        'db-mcp': {
+          profiles: {
+            'file-profile': {
+              type: 'sqlite',
+              filePath: ':memory:',
+            },
+          },
+        },
+      },
+    }));
+    tempDirs.push(dir);
+
+    const config = await resolveMcpProfilesConfig({
+      configPath: path,
+      configKey: 'db-mcp',
+      env: {
+        DB_MCP_PROFILES: JSON.stringify({
+          'env-profile': {
+            type: 'sqlite',
+            filePath: ':memory:',
+          },
+        }),
+      },
+    });
+
+    expect(config?.configPath).toBe(path);
+    expect(Object.keys(config?.profiles || {})).toEqual(['file-profile']);
+  });
+
+  it('should throw when env profiles json is invalid', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mcp-config-reader-env-invalid-'));
+    tempDirs.push(rootDir);
+
+    await expect(resolveMcpProfilesConfig({
+      cwd: rootDir,
+      homeDir: rootDir,
+      env: {
+        DB_MCP_PROFILES: '{invalid-json',
+      },
+    })).rejects.toThrow('DB_MCP_PROFILES');
+  });
+
   it('should throw when auto-discovery finds multiple profile servers without a clear key', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mcp-config-reader-ambiguous-'));
     tempDirs.push(rootDir);

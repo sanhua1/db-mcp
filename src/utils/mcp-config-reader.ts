@@ -22,8 +22,12 @@ export interface ResolveMcpProfilesConfigOptions {
   configKey?: string;
   configPath?: string;
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
   homeDir?: string;
 }
+
+const DB_MCP_PROFILES_ENV_KEY = 'DB_MCP_PROFILES';
+const DB_MCP_DEFAULT_PROFILE_ENV_KEY = 'DB_MCP_DEFAULT_PROFILE';
 
 function extractProfilesConfig(
   serverConfig: any,
@@ -83,6 +87,50 @@ async function parseJsonConfigFile(path: string): Promise<any> {
   } catch {
     throw new Error(`配置文件不是合法 JSON: ${path}`);
   }
+}
+
+function parseJsonContent(rawContent: string, sourceName: string): any {
+  try {
+    return JSON.parse(rawContent);
+  } catch {
+    throw new Error(`${sourceName} 不是合法 JSON`);
+  }
+}
+
+function resolveServerConfigFromEnv(
+  env: NodeJS.ProcessEnv,
+  configKey?: string
+): ResolvedMcpProfilesConfig | null {
+  const rawProfilesConfig = env[DB_MCP_PROFILES_ENV_KEY]?.trim();
+  if (!rawProfilesConfig) {
+    return null;
+  }
+
+  const parsedProfilesConfig = parseJsonContent(rawProfilesConfig, `环境变量 ${DB_MCP_PROFILES_ENV_KEY}`);
+  const parsedServerConfig = parsedProfilesConfig?.profiles &&
+    typeof parsedProfilesConfig.profiles === 'object' &&
+    !Array.isArray(parsedProfilesConfig.profiles)
+    ? {
+        profiles: parsedProfilesConfig.profiles,
+        defaultProfile: parsedProfilesConfig.defaultProfile ?? env[DB_MCP_DEFAULT_PROFILE_ENV_KEY] ?? null,
+      }
+    : {
+        profiles: parsedProfilesConfig,
+        defaultProfile: env[DB_MCP_DEFAULT_PROFILE_ENV_KEY] ?? null,
+      };
+
+  const normalizedDefaultProfile = typeof parsedServerConfig.defaultProfile === 'string'
+    ? parsedServerConfig.defaultProfile.trim() || null
+    : parsedServerConfig.defaultProfile;
+
+  return extractProfilesConfig(
+    {
+      profiles: parsedServerConfig.profiles,
+      defaultProfile: normalizedDefaultProfile,
+    },
+    configKey || 'db-mcp',
+    `env:${DB_MCP_PROFILES_ENV_KEY}`
+  );
 }
 
 function resolveServerConfigFromParsed(
@@ -178,11 +226,17 @@ export async function resolveMcpProfilesConfig(
   options: ResolveMcpProfilesConfigOptions = {}
 ): Promise<ResolvedMcpProfilesConfig | null> {
   const cwd = options.cwd || process.cwd();
+  const env = options.env || process.env;
   const homeDir = options.homeDir || homedir();
 
   if (options.configPath) {
     const parsed = await parseJsonConfigFile(options.configPath);
     return resolveServerConfigFromParsed(parsed, options.configPath, options.configKey);
+  }
+
+  const envConfig = resolveServerConfigFromEnv(env, options.configKey);
+  if (envConfig) {
+    return envConfig;
   }
 
   const candidatePaths = collectAutoDiscoveryPaths(cwd, homeDir);

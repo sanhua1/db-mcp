@@ -42,6 +42,23 @@
 
 ---
 
+## Update
+
+Named stdio profiles now also support `env`-based configuration. This is for MCP gateways that only preserve standard fields such as `type`, `command`, `args`, and `env`, and drop custom fields like `profiles`.
+
+Redacted example:
+
+```toml
+[mcp_servers.db-mcp]
+type = "stdio"
+command = "npx"
+args = ["-y", "github:sanhua1/db-mcp"]
+
+[mcp_servers.db-mcp.env]
+DB_MCP_PROFILES = '{"profile-dev":{"type":"mysql","host":"dev-db.example.com","port":3306,"user":"read-only","password":"your_password","database":"app_dev"},"profile-prod":{"type":"mysql","host":"prod-db.example.com","port":3306,"user":"read-only","password":"your_password","database":"app_prod"}}'
+DB_MCP_DEFAULT_PROFILE = "profile-dev"
+```
+
 ## Why Universal DB MCP?
 
 Imagine asking your AI assistant: *"Show me the top 10 customers by order value this month"* and getting instant results from your database - no SQL writing required. Universal DB MCP makes this possible by bridging AI assistants with your databases through the Model Context Protocol (MCP) and HTTP API.
@@ -156,6 +173,38 @@ If you want to keep a single `db-mcp` server and switch databases by name during
 }
 ```
 
+If your MCP gateway strips non-standard fields such as `profiles`, you can pass the same registry through `env` instead:
+
+```toml
+[mcp_servers.db-mcp]
+type = "stdio"
+command = "npx"
+args = ["-y", "github:sanhua1/db-mcp"]
+
+[mcp_servers.db-mcp.env]
+DB_MCP_PROFILES = '''
+{
+  "profile-dev": {
+    "type": "mysql",
+    "host": "dev-db.example.com",
+    "port": 3306,
+    "user": "read-only",
+    "password": "your_password",
+    "database": "app_dev"
+  },
+  "profile-prod": {
+    "type": "mysql",
+    "host": "prod-db.example.com",
+    "port": 3306,
+    "user": "read-only",
+    "password": "your_password",
+    "database": "app_prod"
+  }
+}
+'''
+DB_MCP_DEFAULT_PROFILE = "profile-dev"
+```
+
 `defaultProfile` is optional. If you omit it, the server starts disconnected. You can then use:
 
 - `list_profiles`
@@ -187,6 +236,15 @@ Example session flow:
 ```
 
 If you call `connect_database`, the server will create a temporary direct connection and clear the current named profile binding for that session.
+
+Priority order:
+
+1. `--config-path` / `--config-key`
+2. `DB_MCP_PROFILES` / `DB_MCP_DEFAULT_PROFILE`
+3. Auto-discovered `.mcp.json`
+4. Auto-discovered `~/.claude.json`
+
+`DB_MCP_PROFILES` accepts either a raw JSON object of `{ profileName: dbConfig }` or a JSON object with `profiles` and optional `defaultProfile`.
 
 If auto-discovery is ambiguous, you can still override it with `--config-path` and `--config-key`.
 

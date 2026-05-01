@@ -120,6 +120,24 @@ DB_PASSWORD=password
 DB_DATABASE=mydb
 ```
 
+### STDIO 命名 Profile 配置
+
+```bash
+# 多 profile 注册表，JSON 字符串
+DB_MCP_PROFILES='{"profile-dev":{"type":"mysql","host":"dev-db.example.com","port":3306,"user":"read-only","password":"your_password","database":"app_dev"}}'
+
+# 可选，默认 profile
+DB_MCP_DEFAULT_PROFILE=profile-dev
+```
+
+说明：
+
+- `DB_MCP_PROFILES` 支持两种 JSON 形态：
+  - `{ "profile-dev": { ... } }`
+  - `{ "profiles": { "profile-dev": { ... } }, "defaultProfile": "profile-dev" }`
+- 优先级顺序：`--config-path` > `DB_MCP_PROFILES` > 自动发现 `.mcp.json` > 自动发现 `~/.claude.json`
+- 适合 aio 这类只保留 `type`、`command`、`args`、`env` 标准字段的 MCP 管理器
+
 ### 会话配置
 
 ```bash
@@ -301,6 +319,38 @@ SESSION_CLEANUP_INTERVAL=300000
 - `profiles` 放在宿主 MCP 配置里
 - `defaultProfile` 可选，不设置时启动后不自动连接
 - 自动发现顺序：当前项目向上查找 `.mcp.json`，然后回退到 `~/.claude.json`
+
+如果宿主会吞掉 `profiles` 非标准字段，也可以改用 `env`：
+
+```toml
+[mcp_servers.db-mcp]
+type = "stdio"
+command = "npx"
+args = ["-y", "github:sanhua1/db-mcp"]
+
+[mcp_servers.db-mcp.env]
+DB_MCP_PROFILES = '''
+{
+  "profile-dev": {
+    "type": "mysql",
+    "host": "dev-db.example.com",
+    "port": 3306,
+    "user": "read-only",
+    "password": "your_password",
+    "database": "app_dev"
+  },
+  "profile-prod": {
+    "type": "mysql",
+    "host": "prod-db.example.com",
+    "port": 3306,
+    "user": "read-only",
+    "password": "your_password",
+    "database": "app_prod"
+  }
+}
+'''
+DB_MCP_DEFAULT_PROFILE = "profile-dev"
+```
 
 profile 模式下建议先调用：
 
